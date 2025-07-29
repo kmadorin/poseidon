@@ -1,0 +1,8 @@
+{
+  "contracts/lib/cross-chain-swap": {
+    "rev": "16d366f4ab33684576a503c92a603482f548c9c0"
+  },
+  "contracts/lib/forge-std": {
+    "rev": "60acb7aaadcce2d68e52986a0a66fe79f07d138f"
+  }
+}

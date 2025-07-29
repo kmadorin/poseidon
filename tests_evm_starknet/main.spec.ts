@@ -1,7 +1,7 @@
 // tests_evm_starknet/main.spec.ts
 import 'dotenv/config'
 import {expect, jest} from '@jest/globals'
-import {spawn, ChildProcess} from 'child_process'
+import {exec, execSync, spawn, ChildProcess} from 'child_process'
 import {JsonRpcProvider, Wallet as SignerWallet, randomBytes, keccak256} from 'ethers'
 import {hash, Contract, cairo, CallData} from 'starknet'
 import Sdk from '@1inch/cross-chain-sdk'
@@ -9,6 +9,7 @@ import {uint8ArrayToHex} from '@1inch/byte-utils'
 import path from 'path'
 import {fileURLToPath} from 'url'
 import {dirname} from 'path'
+import fs from 'fs'
 
 // Load env vars from the correct path
 import dotenv from 'dotenv'
@@ -26,7 +27,7 @@ import {
     getStarknetProvider,
     compileAndDeployStarknetContract
 } from './helpers/starknet-helpers'
-import {deployEvmContracts} from './helpers/evm-helpers'
+import {deployEvmContracts, topUpFromDonor} from './helpers/evm-helpers'
 import {Wallet} from '../tests/wallet'
 import {Resolver} from '../tests/resolver'
 import {EscrowFactory} from '../tests/escrow-factory'
@@ -38,7 +39,6 @@ describe('EVM-to-StarkNet Swap', () => {
     let anvil: ChildProcess
     let starknetDevnet: ChildProcess
     let escrowContractAddress: string
-    let cleanupHandlers: (() => void)[] = []
 
     beforeAll(async () => {
         console.log('Starting Anvil with mainnet fork...')
@@ -48,32 +48,9 @@ describe('EVM-to-StarkNet Swap', () => {
         }
         console.log(`Forking from: ${mainnetRpc}`)
         anvil = spawn('bash', ['-c', `anvil --fork-url ${mainnetRpc}`], {stdio: 'pipe'})
-        anvil.on('error', (error) => console.error('Anvil error:', error))
-        anvil.on('exit', (code) => console.log(`Anvil exited with code ${code}`))
 
         console.log('Starting StarkNet Devnet...')
         starknetDevnet = spawn('bash', ['-c', 'starknet-devnet --seed 0'], {stdio: 'pipe'})
-        starknetDevnet.on('error', (error) => console.error('StarkNet devnet error:', error))
-        starknetDevnet.on('exit', (code) => console.log(`StarkNet devnet exited with code ${code}`))
-
-        // Add process cleanup handlers
-        const cleanup = () => {
-            console.log('Emergency cleanup triggered')
-            if (anvil && !anvil.killed) anvil.kill('SIGKILL')
-            if (starknetDevnet && !starknetDevnet.killed) starknetDevnet.kill('SIGKILL')
-        }
-
-        process.on('exit', cleanup)
-        process.on('SIGINT', cleanup)
-        process.on('SIGTERM', cleanup)
-        process.on('uncaughtException', cleanup)
-
-        cleanupHandlers.push(() => {
-            process.removeListener('exit', cleanup)
-            process.removeListener('SIGINT', cleanup)
-            process.removeListener('SIGTERM', cleanup)
-            process.removeListener('uncaughtException', cleanup)
-        })
 
         // A more robust wait for services to be ready
         await new Promise((resolve) => setTimeout(resolve, 8000))
@@ -87,68 +64,10 @@ describe('EVM-to-StarkNet Swap', () => {
         escrowContractAddress = await compileAndDeployStarknetContract()
     })
 
-    afterAll(async () => {
-        console.log('Active handles before cleanup:')
-        if ((process as any)._getActiveHandles) {
-            console.log((process as any)._getActiveHandles().length)
-        }
-
+    afterAll(() => {
         console.log('Stopping devnets...')
-
-        // Clear any lingering timers
-        const highestTimeoutId = setTimeout(() => {}, 0) as unknown as number
-        for (let i = 0; i <= highestTimeoutId; i++) {
-            clearTimeout(i)
-            clearInterval(i)
-        }
-
-        if (anvil && !anvil.killed) {
-            console.log('Stopping Anvil...')
-            anvil.kill('SIGTERM')
-            await new Promise((resolve) => {
-                const timeout = setTimeout(() => {
-                    console.log('Force killing Anvil')
-                    anvil.kill('SIGKILL')
-                    resolve(undefined)
-                }, 3000)
-
-                anvil.on('exit', () => {
-                    clearTimeout(timeout)
-                    resolve(undefined)
-                })
-            })
-        }
-
-        if (starknetDevnet && !starknetDevnet.killed) {
-            console.log('Stopping StarkNet devnet...')
-            starknetDevnet.kill('SIGTERM')
-            await new Promise((resolve) => {
-                const timeout = setTimeout(() => {
-                    console.log('Force killing StarkNet devnet')
-                    starknetDevnet.kill('SIGKILL')
-                    resolve(undefined)
-                }, 3000)
-
-                starknetDevnet.on('exit', () => {
-                    clearTimeout(timeout)
-                    resolve(undefined)
-                })
-            })
-        }
-
-        // Remove process event listeners
-        cleanupHandlers.forEach((handler) => handler())
-        cleanupHandlers = []
-
-        console.log('Active handles after cleanup:')
-        if ((process as any)._getActiveHandles) {
-            console.log((process as any)._getActiveHandles().length)
-        }
-
-        // Force garbage collection if available
-        if (global.gc) {
-            global.gc()
-        }
+        anvil.kill()
+        starknetDevnet.kill()
     })
 
     it('should perform a successful EVM to StarkNet cross-chain swap', async () => {
