@@ -132,3 +132,10 @@ dist
 
 cache
 .idea
+
+// .DS_Store
+.DS_Store
+
+// starknet build artifacts
+./contracts_starknet/target
+./contracts_starknet/.snfoundry_cache
