@@ -1,7 +1,7 @@
 {
-    "name": "cross-chain-resolver-example",
+    "name": "Poseidon",
     "version": "1.0.0",
-    "description": "Example of 1inch cross chain resolver",
+    "description": "1inch Fusion+ extension for Starknet. Based on https://github.com/1inch/cross-chain-resolver-example",
     "scripts": {
         "hardhat-compile": "hardhat compile",
         "starknet-devnet": "starknet-devnet --seed 0",
@@ -35,9 +35,10 @@
         "jest": "29.7.0",
         "prettier": "^3.2.5",
         "typescript": "5.5.2",
-        "zod": "3.23.8"
+        "zod": "3.23.8",
+        "tsconfig.git#v1.0.0": "github:1inch/tsconfig#v1.0.0"
     },
-    "author": "1inch",
+    "author": "Kirill Madorin",
     "engines": {
         "node": ">=22"
     },
