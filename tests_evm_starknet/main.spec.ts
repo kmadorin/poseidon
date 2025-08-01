@@ -2,14 +2,13 @@
 import 'dotenv/config'
 import {expect, jest} from '@jest/globals'
 import {exec, execSync, spawn, ChildProcess} from 'child_process'
-import {JsonRpcProvider, Wallet as SignerWallet, randomBytes, keccak256} from 'ethers'
+import {JsonRpcProvider, Wallet as SignerWallet, randomBytes, hexlify, keccak256} from 'ethers'
 import {hash, Contract, cairo, CallData} from 'starknet'
 import Sdk from '@1inch/cross-chain-sdk'
 import {uint8ArrayToHex} from '@1inch/byte-utils'
 import path from 'path'
 import {fileURLToPath} from 'url'
 import {dirname} from 'path'
-import fs from 'fs'
 
 // Load env vars from the correct path
 import dotenv from 'dotenv'
@@ -154,6 +153,13 @@ describe('EVM-to-StarkNet Swap', () => {
         console.log('Debug - NetworkEnum:', Sdk.NetworkEnum ? Object.keys(Sdk.NetworkEnum) : 'undefined')
 
         const secret = randomBytes(32)
+        const secretPart1Bytes = secret.slice(0, 16)
+        const secretPart2Bytes = secret.slice(16, 32)
+
+        // 2. Convert each part to a hex string for the calldata
+        const secretPart1Hex = hexlify(secretPart1Bytes)
+        const secretPart2Hex = hexlify(secretPart2Bytes)
+
         const hashLock = keccak256(secret)
         // Use the same keccak256 hash for both EVM and Starknet to prevent maker from using different pre-images
 
@@ -436,7 +442,8 @@ describe('EVM-to-StarkNet Swap', () => {
             'withdraw',
             CallData.compile({
                 escrow_id: orderHashFelt,
-                secret: `0x${Buffer.from(secret).toString('hex')}`
+                secret_part1: secretPart1Hex,
+                secret_part2: secretPart2Hex
             })
         )
         const withdrawStarknetTx = await makerStarknetAccount.execute(withdrawStarknetCall)

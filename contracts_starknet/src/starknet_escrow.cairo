@@ -1,6 +1,6 @@
 use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
 use starknet::ContractAddress;
-use super::keccak_helper::{keccak_felt252_to_felt252};
+use super::keccak_helper::{keccak_2_felts_to_felt252};
 
 // Constants for native ETH handling on Starknet
 const ETH_CONTRACT_ADDRESS: felt252 =
@@ -46,7 +46,7 @@ pub trait IStarknetEscrow<TContractState> {
         hashlock: felt252,
         timelocks: Timelocks,
     );
-    fn withdraw(ref self: TContractState, escrow_id: felt252, secret: felt252);
+    fn withdraw(ref self: TContractState, escrow_id: felt252, secret_part1: felt252, secret_part2: felt252);
     fn cancel(ref self: TContractState, escrow_id: felt252);
     fn get_escrow(self: @TContractState, escrow_id: felt252) -> Escrow;
     fn escrow_exists(self: @TContractState, escrow_id: felt252) -> bool;
@@ -59,7 +59,7 @@ pub mod StarknetEscrow {
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use super::{
         ETH_CONTRACT_ADDRESS, Escrow, EscrowStatus, IERC20Dispatcher, IERC20DispatcherTrait,
-        IStarknetEscrow, Timelocks, keccak_felt252_to_felt252,
+        IStarknetEscrow, Timelocks, keccak_2_felts_to_felt252,
     };
 
     #[storage]
@@ -91,7 +91,8 @@ pub mod StarknetEscrow {
     pub struct Withdrawn {
         #[key]
         pub escrow_id: felt252,
-        pub secret: felt252,
+        pub secret_part1: felt252,
+        pub secret_part2: felt252,
     }
 
     #[derive(Copy, Drop, Debug, PartialEq, starknet::Event)]
@@ -168,7 +169,7 @@ pub mod StarknetEscrow {
                 );
         }
 
-        fn withdraw(ref self: ContractState, escrow_id: felt252, secret: felt252) {
+        fn withdraw(ref self: ContractState, escrow_id: felt252, secret_part1: felt252, secret_part2: felt252) {
             // Read the Escrow data from storage using the escrow_id
             let mut escrow = self.escrows.read(escrow_id);
 
@@ -181,7 +182,7 @@ pub mod StarknetEscrow {
             assert(current_time >= escrow.timelocks.withdrawal, 'Withdrawal period not started');
 
             // Compute the keccak256 hash of the provided secret to match EVM behavior
-            let computed_hash: felt252 = keccak_felt252_to_felt252(secret);
+            let computed_hash = keccak_2_felts_to_felt252(secret_part1, secret_part2);
 
             // Assert that the computed hash matches the stored hashlock
             assert(computed_hash == escrow.hashlock, 'Invalid secret');
@@ -211,7 +212,7 @@ pub mod StarknetEscrow {
             );
 
             // Emit Withdrawn event
-            self.emit(Event::Withdrawn(Withdrawn { escrow_id, secret }));
+            self.emit(Event::Withdrawn(Withdrawn { escrow_id, secret_part1, secret_part2 }));
         }
 
         fn cancel(ref self: ContractState, escrow_id: felt252) {
