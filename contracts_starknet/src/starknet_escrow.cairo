@@ -1,7 +1,6 @@
-use core::hash::{HashStateExTrait, HashStateTrait};
-use core::poseidon::PoseidonTrait;
 use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
 use starknet::ContractAddress;
+use super::keccak_helper::{keccak_felt252_to_felt252};
 
 // Constants for native ETH handling on Starknet
 const ETH_CONTRACT_ADDRESS: felt252 =
@@ -30,7 +29,7 @@ pub struct Escrow {
     pub token: ContractAddress,
     pub amount: u256,
     pub safety_deposit: u256,
-    pub hashlock_starknet: felt252,
+    pub hashlock: felt252,
     pub timelocks: Timelocks,
     pub status: EscrowStatus,
 }
@@ -44,7 +43,7 @@ pub trait IStarknetEscrow<TContractState> {
         token: ContractAddress,
         amount: u256,
         safety_deposit: u256,
-        hashlock_starknet: felt252,
+        hashlock: felt252,
         timelocks: Timelocks,
     );
     fn withdraw(ref self: TContractState, escrow_id: felt252, secret: felt252);
@@ -59,8 +58,8 @@ pub mod StarknetEscrow {
     use starknet::storage::{Map, StorageMapReadAccess, StorageMapWriteAccess};
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use super::{
-        ETH_CONTRACT_ADDRESS, Escrow, EscrowStatus, HashStateExTrait, HashStateTrait,
-        IERC20Dispatcher, IERC20DispatcherTrait, IStarknetEscrow, PoseidonTrait, Timelocks,
+        ETH_CONTRACT_ADDRESS, Escrow, EscrowStatus, IERC20Dispatcher, IERC20DispatcherTrait,
+        IStarknetEscrow, Timelocks, keccak_felt252_to_felt252,
     };
 
     #[storage]
@@ -85,7 +84,7 @@ pub mod StarknetEscrow {
         pub token: ContractAddress,
         pub amount: u256,
         pub safety_deposit: u256,
-        pub hashlock_starknet: felt252,
+        pub hashlock: felt252,
     }
 
     #[derive(Copy, Drop, Debug, PartialEq, starknet::Event)]
@@ -110,7 +109,7 @@ pub mod StarknetEscrow {
             token: ContractAddress,
             amount: u256,
             safety_deposit: u256,
-            hashlock_starknet: felt252,
+            hashlock: felt252,
             timelocks: Timelocks,
         ) {
             // Assert that an escrow with the given escrow_id does not already exist
@@ -144,7 +143,7 @@ pub mod StarknetEscrow {
                 token,
                 amount,
                 safety_deposit,
-                hashlock_starknet,
+                hashlock,
                 timelocks,
                 status: EscrowStatus::Active,
             };
@@ -163,7 +162,7 @@ pub mod StarknetEscrow {
                             token,
                             amount,
                             safety_deposit,
-                            hashlock_starknet,
+                            hashlock,
                         },
                     ),
                 );
@@ -181,11 +180,11 @@ pub mod StarknetEscrow {
             let current_time = get_block_timestamp();
             assert(current_time >= escrow.timelocks.withdrawal, 'Withdrawal period not started');
 
-            // Compute the Poseidon hash of the provided secret
-            let computed_hash = PoseidonTrait::new().update_with(secret).finalize();
+            // Compute the keccak256 hash of the provided secret to match EVM behavior
+            let computed_hash: felt252 = keccak_felt252_to_felt252(secret);
 
-            // Assert that the computed hash matches the stored hashlock_starknet
-            assert(computed_hash == escrow.hashlock_starknet, 'Invalid secret');
+            // Assert that the computed hash matches the stored hashlock
+            assert(computed_hash == escrow.hashlock, 'Invalid secret');
 
             // Extract values before modifying escrow
             let token_address = escrow.token;

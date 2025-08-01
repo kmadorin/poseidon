@@ -33,7 +33,7 @@ import {Resolver} from '../tests/resolver'
 import {EscrowFactory} from '../tests/escrow-factory'
 import {config as evmConfig} from '../tests/config'
 
-jest.setTimeout(1000 * 120) // 2 minutes timeout for the whole test
+jest.setTimeout(1000 * 300) // 5 minutes timeout for cross-chain tests including StarkNet deployment
 
 describe('EVM-to-StarkNet Swap', () => {
     let anvil: ChildProcess
@@ -99,21 +99,26 @@ describe('EVM-to-StarkNet Swap', () => {
         )
         const donorAddress = evmConfig.chain.source.tokens.USDC.donor
 
-        // Fund donor with ETH for gas (only once)
+        // Get base nonce for anvilAccount to manage multiple transactions properly
+        const anvilBaseNonce = await evmProvider.getTransactionCount(anvilAccount.address)
+
+        // Fund donor with ETH for gas (nonce: base + 0)
         const fundDonorTx = await anvilAccount.sendTransaction({
             to: donorAddress,
-            value: 10n ** 18n // 1 ETH for gas
+            value: 10n ** 18n, // 1 ETH for gas
+            nonce: anvilBaseNonce
         })
         await fundDonorTx.wait()
 
-        // Fund resolver with ETH for gas fees and safety deposits
+        // Fund resolver with ETH for gas fees and safety deposits (nonce: base + 1)
         const fundResolverTx = await anvilAccount.sendTransaction({
             to: await resolverEvmWallet.getAddress(),
-            value: 10n ** 18n // 1 ETH
+            value: 10n ** 18n, // 1 ETH
+            nonce: anvilBaseNonce + 1
         })
         await fundResolverTx.wait()
 
-        // Use the donor to fund both accounts with USDC
+        // Use the donor to fund both accounts with USDC (ensure transactions are sequential)
         const donorWallet = await Wallet.fromAddress(donorAddress, evmProvider)
         await donorWallet.transferToken(usdcAddress, await makerEvmWallet.getAddress(), makerInitialUsdcAmount)
         await donorWallet.transferToken(usdcAddress, await resolverEvmWallet.getAddress(), makerInitialUsdcAmount)
@@ -121,11 +126,13 @@ describe('EVM-to-StarkNet Swap', () => {
         // IMPORTANT: Fund the resolver CONTRACT with USDC (not just the resolver wallet)
         await donorWallet.transferToken(usdcAddress, resolverAddress, makerInitialUsdcAmount * 2n)
 
-        // Fund resolver contract with ETH for gas
-        await anvilAccount.sendTransaction({
+        // Fund resolver contract with ETH for gas (nonce: base + 2)
+        const fundResolverContractEthTx = await anvilAccount.sendTransaction({
             to: resolverAddress,
-            value: 10n ** 18n // 1 ETH
+            value: 10n ** 18n, // 1 ETH
+            nonce: anvilBaseNonce + 2
         })
+        await fundResolverContractEthTx.wait()
 
         // Get resolver contract wallet and approve escrow factory
         const resolverContractWallet = await Wallet.fromAddress(resolverAddress, evmProvider)
@@ -138,16 +145,17 @@ describe('EVM-to-StarkNet Swap', () => {
             makerInitialUsdcAmount
         )
 
+        // Add a small delay to ensure all funding transactions are processed
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+
         // 2. Phase 1: Order Creation (Off-chain)
         console.log('Debug - Sdk object:', typeof Sdk, Sdk ? Object.keys(Sdk).slice(0, 10) : 'null')
         console.log('Debug - CrossChainOrder available:', !!Sdk.CrossChainOrder)
         console.log('Debug - NetworkEnum:', Sdk.NetworkEnum ? Object.keys(Sdk.NetworkEnum) : 'undefined')
 
-        const {Address} = Sdk || {}
-
         const secret = randomBytes(32)
-        const evmHashLock = keccak256(secret)
-        const starknetHashLock = hash.computePoseidonHashOnElements([`0x${Buffer.from(secret).toString('hex')}`])
+        const hashLock = keccak256(secret)
+        // Use the same keccak256 hash for both EVM and Starknet to prevent maker from using different pre-images
 
         // Create order with a supported chain ID first (using BSC as destination)
         const order = Sdk.CrossChainOrder.new(
@@ -230,6 +238,9 @@ describe('EVM-to-StarkNet Swap', () => {
 
         // Get the full block details to find its timestamp
         const evmBlock = await evmProvider.getBlock(evmBlockHash)
+        if (!evmBlock) {
+            throw new Error(`Failed to get block ${evmBlockHash}`)
+        }
         const deployedAt = BigInt(evmBlock.timestamp) // Convert to BigInt for compatibility
 
         const escrowSrcDeploymentEvent = await new EscrowFactory(evmProvider, escrowFactoryAddress).getSrcDeployEvent(
@@ -410,7 +421,7 @@ describe('EVM-to-StarkNet Swap', () => {
                 token: '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d', // STRK token address
                 amount: cairo.uint256(order.takingAmount),
                 safety_deposit: cairo.uint256(10n ** 15n), // Use the same safety deposit as defined in the order
-                hashlock_starknet: starknetHashLock,
+                hashlock: hashLock,
                 timelocks
             })
         )

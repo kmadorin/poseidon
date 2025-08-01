@@ -8,7 +8,7 @@ pub trait IMockERC20<TContractState> {
     fn approve(ref self: TContractState, spender: starknet::ContractAddress, amount: u256) -> bool;
     fn transfer_from(ref self: TContractState, from: starknet::ContractAddress, to: starknet::ContractAddress, amount: u256) -> bool;
     fn allowance(self: @TContractState, owner: starknet::ContractAddress, spender: starknet::ContractAddress) -> u256;
-    
+
     // Mock-specific functions for testing
     fn mint(ref self: TContractState, to: starknet::ContractAddress, amount: u256);
     fn get_balance(self: @TContractState, account: starknet::ContractAddress) -> u256;
@@ -47,7 +47,7 @@ pub mod MockERC20 {
     pub struct Transfer {
         #[key]
         pub from: ContractAddress,
-        #[key] 
+        #[key]
         pub to: ContractAddress,
         pub value: u256,
     }
@@ -68,7 +68,7 @@ pub mod MockERC20 {
         self.address_1.write(recipient);
         self.balance_2.write(0);
         self.address_2.write(0.try_into().unwrap());
-        
+
         self.emit(Event::Transfer(Transfer {
             from: 0.try_into().unwrap(),
             to: recipient,
@@ -94,14 +94,14 @@ pub mod MockERC20 {
             let from = get_caller_address();
             let from_balance = self.get_balance(from);
             assert(from_balance >= amount, 'Insufficient balance');
-            
+
             // Update sender balance
             self.set_balance(from, from_balance - amount);
-            
+
             // Update recipient balance
             let to_balance = self.get_balance(to);
             self.set_balance(to, to_balance + amount);
-            
+
             self.emit(Event::Transfer(Transfer {
                 from,
                 to,
@@ -113,10 +113,10 @@ pub mod MockERC20 {
         fn mint(ref self: ContractState, to: ContractAddress, amount: u256) {
             let current_supply = self.total_supply.read();
             let current_balance = self.get_balance(to);
-            
+
             self.total_supply.write(current_supply + amount);
             self.set_balance(to, current_balance + amount);
-            
+
             self.emit(Event::Transfer(Transfer {
                 from: 0.try_into().unwrap(),
                 to,
@@ -165,20 +165,20 @@ pub mod MockERC20 {
             let spender = get_caller_address();
             let current_allowance = self.allowance(from, spender);
             assert(current_allowance >= amount, 'Insufficient allowance');
-            
+
             let from_balance = self.get_balance(from);
             assert(from_balance >= amount, 'Insufficient balance');
-            
+
             // Update balances
             self.set_balance(from, from_balance - amount);
             let to_balance = self.get_balance(to);
             self.set_balance(to, to_balance + amount);
-            
+
             // Update allowance
             if current_allowance != 0xffffffffffffffffffffffffffffffff { // not max allowance
                 self.allowance_amount.write(current_allowance - amount);
             }
-            
+
             self.emit(Event::Transfer(Transfer {
                 from,
                 to,
