@@ -64,22 +64,24 @@ export class Wallet {
         })
     }
 
-    public async transferToken(token: string, dest: string, amount: bigint): Promise<void> {
+    public async transferToken(token: string, dest: string, amount: bigint): Promise<{hash: string}> {
         const tx = await this.signer.sendTransaction({
             to: token.toString(),
             data: '0xa9059cbb' + coder.encode(['address', 'uint256'], [dest.toString(), amount]).slice(2)
         })
 
         await tx.wait()
+        return {hash: tx.hash}
     }
 
-    public async approveToken(token: string, spender: string, amount: bigint): Promise<void> {
+    public async approveToken(token: string, spender: string, amount: bigint): Promise<{hash: string}> {
         const tx = await this.signer.sendTransaction({
             to: token.toString(),
             data: '0x095ea7b3' + coder.encode(['address', 'uint256'], [spender.toString(), amount]).slice(2)
         })
 
         await tx.wait()
+        return {hash: tx.hash}
     }
 
     public async signOrder(srcChainId: number, order: Sdk.CrossChainOrder): Promise<string> {

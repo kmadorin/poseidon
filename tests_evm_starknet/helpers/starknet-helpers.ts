@@ -152,11 +152,6 @@ export async function compileAndDeployStarknetContract(): Promise<string> {
     // Add small delay to ensure balance is updated after funding
     await new Promise((resolve) => setTimeout(resolve, 1000))
 
-    const makerBalance = await getStarknetAccountBalance(process.env.MAKER_STARKNET_ADDRESS!, 'WEI')
-    const resolverBalance = await getStarknetAccountBalance(process.env.RESOLVER_STARKNET_ADDRESS!, 'WEI')
-    console.log(`Maker Account balance: ${makerBalance} WEI`)
-    console.log(`Resolver Account balance: ${resolverBalance} WEI`)
-
     // Ensure your .env file has the deployer's address and private key
     const deployerAccount = new Account(
         provider,

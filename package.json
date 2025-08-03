@@ -8,6 +8,8 @@
         "test": "forge build && node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
         "test:evm-starknet": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --rootDir=tests_evm_starknet main.spec.ts",
         "deploy:starknet": "ts-node tests_evm_starknet/scripts/deploy-starknet.ts",
+        "start:evm": "anvil --fork-url https://eth.merkle.io",
+        "start:starknet": "starknet-devnet --seed 0",
         "lint": "eslint  \"tests/**/*.ts\""
     },
     "devDependencies": {
