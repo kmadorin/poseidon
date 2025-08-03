@@ -1,4 +1,4 @@
-# cross-chain-resolver-example
+# Poseidon. 1inch fusion+ protocol extension Starknet
 
 ## Installation
 
@@ -14,33 +14,79 @@ Install [foundry](https://book.getfoundry.sh/getting-started/installation)
 curl -L https://foundry.paradigm.xyz | bash
 ```
 
+Install [starknet-foundry](https://foundry-rs.github.io/starknet-foundry/getting-started/installation.html)
+
+```shell
+asdf plugin add scarb
+
+asdf install scarb latest
+
+asdf set --home scarb latest
+
+```
+
+To verify that Scarb was installed, run:
+
+```shell
+scarb --version
+```
+
+Install [starknet-devnet](https://0xspaceshard.github.io/starknet-devnet/docs/running/install). Anvil analogue on Starknet:
+
+From crates.io:
+
+```shell
+cargo install starknet-devnet
+```
+
+Or using asdf:
+
+```shell
+asdf plugin add starknet-devnet
+asdf install starknet-devnet latest
+```
+
 Install contract deps
 
 ```shell
 forge install
 ```
 
-## Running
-
-To run tests you need to provide fork urls for Ethereum and Bsc
+Populate env:
 
 ```shell
-SRC_CHAIN_RPC=ETH_FORK_URL DST_CHAIN_RPC=BNB_FORK_URL pnpm test
+cp .env.example .env
+cd tests_evm_starknet && cp .env.example .env
 ```
 
-### Public rpc
+Build contracts:
 
-| Chain    | Url                          |
-|----------|------------------------------|
-| Ethereum | https://eth.merkle.io        |
-| BSC      | wss://bsc-rpc.publicnode.com |
-
-## Test accounts
-
-### Available Accounts
-
+```shell
+forge build
+cd contracts_starknet && scarb build
 ```
-(0) 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" Owner of EscrowFactory
-(1) 0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8" User
-(2) 0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" Resolver
+
+## Running
+
+Run EVM <-> Starknet swap test:
+
+```shell
+pnpm run test:evm-starknet
 ```
+
+### Public rpc used in .env.example:
+
+| Chain    | Url                                                  |
+| -------- | ---------------------------------------------------- |
+| Ethereum | https://eth.merkle.io                                |
+| Starknet | https://starknet-mainnet.public.blastapi.io/rpc/v0_8 |
+
+## EVM -> Starknet swap steps (USDC on EVM to ETH on Starknet):
+
+1. Alice(Maker) creates and signs limit order on EVM chain and publishes to Bob(Resolver)
+2. Bob atomically deploys Hash Timelocked Escrow on EVM chain and fills the limit order on EVM
+3. Bob creates and funds Escrow on the destination chain with the same hash and smaller timelock
+   On steps 2 and 3 Bob also provides a security deposit as an incentive for other resolvers to complete the swap anyway, after both timelocks will be expired
+4. Alice reveals the secret on Starknet to get maker amount of STRK via withdraw call of Starknet escrow contract
+5. Bob listens to withdraw events and once a withdrawal occurs, he gets the secret to get maker amount on EVM chain.
+6. Bob gets maker amount on the EVM chain (swap completed)
