@@ -148,9 +148,6 @@ describe('EVM-to-StarkNet Swap', () => {
         await new Promise((resolve) => setTimeout(resolve, 1000))
 
         // 2. Phase 1: Order Creation (Off-chain)
-        console.log('Debug - Sdk object:', typeof Sdk, Sdk ? Object.keys(Sdk).slice(0, 10) : 'null')
-        console.log('Debug - CrossChainOrder available:', !!Sdk.CrossChainOrder)
-        console.log('Debug - NetworkEnum:', Sdk.NetworkEnum ? Object.keys(Sdk.NetworkEnum) : 'undefined')
 
         const secret = randomBytes(32)
         const secretPart1Bytes = secret.slice(0, 16)
@@ -232,13 +229,6 @@ describe('EVM-to-StarkNet Swap', () => {
                 .setAmountThreshold(order.takingAmount),
             order.makingAmount
         )
-
-        // Debug the transaction before sending
-        console.log('Transaction to send:')
-        console.log('  To:', deploySrcTx.to)
-        console.log('  Data:', deploySrcTx.data)
-        console.log('  Data length:', deploySrcTx.data?.length)
-        console.log('  Value:', deploySrcTx.value?.toString())
 
         const {blockHash: evmBlockHash} = await resolverEvmWallet.send(deploySrcTx)
 
