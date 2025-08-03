@@ -3,12 +3,13 @@ import 'dotenv/config'
 import {expect, jest} from '@jest/globals'
 import {exec, execSync, spawn, ChildProcess} from 'child_process'
 import {JsonRpcProvider, Wallet as SignerWallet, randomBytes, hexlify, keccak256} from 'ethers'
-import {hash, Contract, cairo, CallData} from 'starknet'
+import {hash, Contract, cairo, CallData, config} from 'starknet'
 import Sdk from '@1inch/cross-chain-sdk'
 import {uint8ArrayToHex} from '@1inch/byte-utils'
 import path from 'path'
 import {fileURLToPath} from 'url'
 import {dirname} from 'path'
+import {erc20Abi} from './helpers/erc20'
 
 // Load env vars from the correct path
 import dotenv from 'dotenv'
@@ -35,19 +36,40 @@ import {config as evmConfig} from '../tests/config'
 jest.setTimeout(1000 * 300) // 5 minutes timeout for cross-chain tests including StarkNet deployment
 
 describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
+    let anvil: ChildProcess
+    let starknetDevnet: ChildProcess
+
     beforeAll(async () => {
-        console.log('🚀 DEMO SETUP: Preparing blockchain environments...')
+        console.log('Starting Anvil with mainnet fork...')
+        const mainnetRpc = process.env.SRC_CHAIN_RPC
+        if (!mainnetRpc) {
+            throw new Error('SRC_CHAIN_RPC not found in environment variables')
+        }
+        console.log(`Forking from: ${mainnetRpc}`)
+        anvil = spawn('bash', ['-c', `anvil --fork-url ${mainnetRpc}`], {stdio: 'pipe'})
+
+        console.log('Starting StarkNet Devnet...')
+        starknetDevnet = spawn('bash', ['-c', 'starknet-devnet --seed 0'], {stdio: 'pipe'})
+
+        // A more robust wait for services to be ready
+        await new Promise((resolve) => setTimeout(resolve, 8000))
+        console.log('Devnets should be running.')
+
+        console.log('Funding StarkNet accounts...')
+        await fundStarknetAccount(process.env.MAKER_STARKNET_ADDRESS!, 100n * 10n ** 18n, 'WEI') // 100 ETH
+        await fundStarknetAccount(process.env.RESOLVER_STARKNET_ADDRESS!, 100n * 10n ** 18n, 'WEI') // 100 ETH
+
         console.log('📋 Funding Alice and Bob accounts on Starknet...')
-        await fundStarknetAccount(process.env.MAKER_STARKNET_ADDRESS!, 100n * 10n ** 18n, 'WEI') // 100 ETH for Alice
+        // await fundStarknetAccount(process.env.MAKER_STARKNET_ADDRESS!, 100n * 10n ** 18n, 'WEI') // 100 ETH for Alice
         await fundStarknetAccount(process.env.RESOLVER_STARKNET_ADDRESS!, 100n * 10n ** 18n, 'WEI') // 100 ETH for Bob
         console.log('✅ SETUP COMPLETE: Accounts funded successfully')
     })
 
-    // afterAll(() => {
-    //     console.log('Stopping devnets...')
-    //     anvil.kill()
-    //     starknetDevnet.kill()
-    // })
+    afterAll(() => {
+        console.log('Stopping devnets...')
+        anvil.kill()
+        starknetDevnet.kill()
+    })
 
     it('should perform a successful EVM to StarkNet cross-chain swap', async () => {
         console.log('\n🎬 STARTING CROSS-CHAIN SWAP DEMO')
@@ -114,9 +136,9 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
             nonce: anvilBaseNonce + 1
         })
         await fundBobTx.wait()
-        console.log(`✅ Bob funded with ETH for gas fees | Tx: ${fundBobTx.hash}`)
+        console.log(`✅ Bob funded with ETH for gas fees and safety deposits | Tx: ${fundBobTx.hash}`)
 
-        // Use the donor to fund both accounts with USDC (ensure transactions are sequential)
+        // Use the donor to fund Alice account with USDC (ensure transactions are sequential)
         const donorWallet = await Wallet.fromAddress(donorAddress, evmProvider)
         const fundAliceUsdcTx = await donorWallet.transferToken(
             usdcAddress,
@@ -124,18 +146,6 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
             aliceInitialUsdcAmount
         )
         console.log(`✅ Alice funded with ${aliceInitialUsdcAmount / 10n ** 6n} USDC | Tx: ${fundAliceUsdcTx.hash}`)
-
-        // Bob's resolver contract will get USDC from Alice's limit order execution, not pre-funding
-        console.log("✅ Bob's resolver contract will earn USDC from executing Alice's order")
-
-        // Fund resolver contract with ETH for gas (nonce: base + 2)
-        const fundBobContractEthTx = await anvilAccount.sendTransaction({
-            to: resolverAddress,
-            value: 10n ** 18n, // 1 ETH
-            nonce: anvilBaseNonce + 2
-        })
-        await fundBobContractEthTx.wait()
-        console.log(`✅ Bob's resolver contract funded with ETH | Tx: ${fundBobContractEthTx.hash}`)
 
         // Approve tokens to LimitOrderProtocol (not resolver directly)
         const aliceApproveTx = await aliceEvmWallet.approveToken(
@@ -172,7 +182,7 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
                 takingAmount: 1n * 10n ** 18n, // 1 STRK (example)
                 makerAsset: new Sdk.Address(usdcAddress),
                 takerAsset: new Sdk.Address(
-                    '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d'.slice(0, 42)
+                    '0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7'.slice(0, 42)
                 ) // Truncate to EVM address format
             },
             {
@@ -187,7 +197,7 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
                     dstCancellation: 101n // 1sec public withdrawal
                 }),
                 srcChainId: evmConfig.chain.source.chainId,
-                dstChainId: 56, // Use BSC (supported chain ID)
+                dstChainId: 56, // Use BSC (supported chain ID, will be changed to Starknet later in test)
                 srcSafetyDeposit: 10n ** 15n,
                 dstSafetyDeposit: 10n ** 15n
             },
@@ -223,12 +233,15 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
         // Display order details
         console.log('✅ Alice created limit order with following details:')
         console.log(`   💰 Maker Amount: ${aliceInitialUsdcAmount / 10n ** 6n} USDC`)
-        console.log(`   💰 Taker Amount: ${order.takingAmount / 10n ** 18n} STRK`)
+        console.log(`   💰 Taker Amount: ${order.takingAmount / 10n ** 18n} ETH`)
         console.log(`   🔗 Source Chain: Ethereum (${evmConfig.chain.source.chainId})`)
         console.log(`   🔗 Destination Chain: Starknet (1337)`)
         console.log(`   🔒 Order Hash: ${orderHash}`)
         console.log(`   ✍️  Signature: ${signature}`)
 
+        const aliceUSDCBalanceBeforeEscrowSrcDeployment = await aliceEvmWallet.tokenBalance(usdcAddress)
+
+        console.log('aliceUSDCBalanceBeforeEscrowSrcDeployment: ', aliceUSDCBalanceBeforeEscrowSrcDeployment)
         // Step 6: Bob fills the order and creates EscrowSrc contract on EVM with safety deposit
         console.log("\n🔄 STEP 6: Bob fills Alice's order and creates EscrowSrc contract on EVM...")
         const resolver = new Resolver(resolverAddress, resolverAddress)
@@ -243,15 +256,13 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
             order.makingAmount
         )
 
-        const {blockHash: evmBlockHash} = await bobEvmWallet.send(deploySrcTx)
-        console.log(`✅ Bob filled order and created EscrowSrc with safety deposit | Block: ${evmBlockHash}`)
+        const result = await bobEvmWallet.send(deploySrcTx)
+        const {blockTimestamp: timestamp, txHash, blockHash: evmBlockHash} = result
+        console.log(`✅ Bob filled order and created EscrowSrc with safety deposit | txHash: ${txHash}`)
 
-        // Get the full block details to find its timestamp
-        const evmBlock = await evmProvider.getBlock(evmBlockHash)
-        if (!evmBlock) {
-            throw new Error(`Failed to get block ${evmBlockHash}`)
-        }
-        const deployedAt = BigInt(evmBlock.timestamp) // Convert to BigInt for compatibility
+        const aliceUSDCBalanceAfterEscrowSrcDeployment = await aliceEvmWallet.tokenBalance(usdcAddress)
+        console.log('aliceUSDCBalanceAfterEscrowSrcDeployment: ', aliceUSDCBalanceAfterEscrowSrcDeployment)
+        const deployedAt = BigInt(timestamp) // Convert to BigInt for compatibility
 
         const escrowSrcDeploymentEvent = await new EscrowFactory(evmProvider, escrowFactoryAddress).getSrcDeployEvent(
             evmBlockHash
@@ -268,7 +279,7 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
         const strkTokenAddress = '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d'
         const ethTokenAddress = '0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7'
 
-        // Mint STRK tokens using devnet_mint JSON-RPC method
+        // Mint ETH tokens using devnet_mint JSON-RPC method
         const mintAmount = order.takingAmount
         const mintAmountNum = Number(mintAmount)
         const mintBody = JSON.stringify({
@@ -278,7 +289,7 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
             params: {
                 address: bobStarknetAccount.address,
                 amount: mintAmountNum,
-                unit: 'FRI'
+                unit: 'WEI'
             }
         })
 
@@ -322,82 +333,39 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
         }
 
         // Create contract instances for STRK and ETH tokens
-        const strkContract = new Contract(
-            [
-                {
-                    name: 'approve',
-                    type: 'function',
-                    inputs: [
-                        {name: 'spender', type: 'felt'},
-                        {name: 'amount', type: 'Uint256'}
-                    ],
-                    outputs: [{name: 'success', type: 'felt'}]
-                },
-                {
-                    name: 'transfer_from',
-                    type: 'function',
-                    inputs: [
-                        {name: 'sender', type: 'felt'},
-                        {name: 'recipient', type: 'felt'},
-                        {name: 'amount', type: 'Uint256'}
-                    ],
-                    outputs: [{name: 'success', type: 'felt'}]
-                }
-            ],
-            strkTokenAddress,
-            starknetProvider
-        )
+        const strkContract = new Contract(erc20Abi, strkTokenAddress, starknetProvider)
         strkContract.connect(bobStarknetAccount)
 
-        const ethContract = new Contract(
-            [
-                {
-                    name: 'approve',
-                    type: 'function',
-                    inputs: [
-                        {name: 'spender', type: 'felt'},
-                        {name: 'amount', type: 'Uint256'}
-                    ],
-                    outputs: [{name: 'success', type: 'felt'}]
-                },
-                {
-                    name: 'transfer_from',
-                    type: 'function',
-                    inputs: [
-                        {name: 'sender', type: 'felt'},
-                        {name: 'recipient', type: 'felt'},
-                        {name: 'amount', type: 'Uint256'}
-                    ],
-                    outputs: [{name: 'success', type: 'felt'}]
-                }
-            ],
-            ethTokenAddress,
-            starknetProvider
-        )
+        const ethContract = new Contract(erc20Abi, ethTokenAddress, starknetProvider)
         ethContract.connect(bobStarknetAccount)
 
+        const bobEthBalance = await ethContract.balanceOf(bobStarknetAccount.address)
+        console.log('bobEthBalance: ', bobEthBalance)
+
         // Approve escrow contract to spend tokens
-        const approveStrkCall = strkContract.populate(
-            'approve',
-            CallData.compile({
-                spender: escrowContractAddress,
-                amount: cairo.uint256(order.takingAmount)
-            })
-        )
-        const approveStrkTx = await bobStarknetAccount.execute(approveStrkCall)
-        await starknetProvider.waitForTransaction(approveStrkTx.transaction_hash)
-        console.log(`✅ Bob approved ${order.takingAmount / 10n ** 18n} STRK | Tx: ${approveStrkTx.transaction_hash}`)
+        // const approveTakerEthCall = ethContract.populate(
+        //     'approve',
+        //     CallData.compile({
+        //         spender: escrowContractAddress,
+        //         amount: cairo.uint256(order.takingAmount)
+        //     })
+        // )
+        // const approveTakerEthTx = await bobStarknetAccount.execute(approveTakerEthCall)
+        // await starknetProvider.waitForTransaction(approveTakerEthTx.transaction_hash)
+        // console.log(
+        //     `✅ Bob approved ${order.takingAmount / 10n ** 18n} ETH | Tx: ${approveTakerEthTx.transaction_hash}`
+        // )
 
         const approveEthCall = ethContract.populate(
             'approve',
             CallData.compile({
                 spender: escrowContractAddress,
-                amount: cairo.uint256(10n ** 15n) // Safety deposit
+                amount: cairo.uint256(order.takingAmount + 10n ** 15n) // Safety deposit + taker amount
             })
         )
         const approveEthTx = await bobStarknetAccount.execute(approveEthCall)
         await starknetProvider.waitForTransaction(approveEthTx.transaction_hash)
-        console.log(`✅ Bob approved ETH for safety deposit | Tx: ${approveEthTx.transaction_hash}`)
+        console.log(`✅ Bob approved ETH for safety deposit and taker amount | Tx: ${approveEthTx.transaction_hash}`)
 
         starknetEscrow.connect(bobStarknetAccount)
 
@@ -416,7 +384,7 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
             CallData.compile({
                 escrow_id: orderHashFelt,
                 maker: aliceStarknetAccount.address,
-                token: '0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d', // STRK token address
+                token: '0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7', // ETH token address
                 amount: cairo.uint256(order.takingAmount),
                 safety_deposit: cairo.uint256(10n ** 15n), // Use the same safety deposit as defined in the order
                 hashlock: hashLock,
@@ -440,10 +408,14 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
                 secret_part2: secretPart2Hex
             })
         )
+
+        const aliceInitialEthBalance = await ethContract.balanceOf(aliceStarknetAccount.address)
+        console.log('aliceInitialEthBalance: ', aliceInitialEthBalance)
+
         const withdrawStarknetTx = await aliceStarknetAccount.execute(withdrawStarknetCall)
         await starknetProvider.waitForTransaction(withdrawStarknetTx.transaction_hash)
         console.log(
-            `✅ Alice revealed secret and received ${order.takingAmount / 10n ** 18n} STRK | Tx: ${withdrawStarknetTx.transaction_hash}`
+            `✅ Alice revealed secret and received ${order.takingAmount / 10n ** 18n} ETH | Tx: ${withdrawStarknetTx.transaction_hash}`
         )
 
         // Step 9: Bob extracts the secret from Starknet event and gets maker amount on source chain
@@ -469,15 +441,17 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
         // Step 10: Verification
         console.log('\n✅ STEP 10: Verifying successful cross-chain swap...')
         const aliceFinalUsdc = await aliceEvmWallet.tokenBalance(usdcAddress)
-        // expect(aliceFinalUsdc).toBe(0n)
-        expect(true).toBe(true)
-        // console.log(`✅ Alice's final USDC balance: ${aliceFinalUsdc} (expected: 0)`)
+        expect(aliceFinalUsdc).toBe(0n)
+        // expect(true).toBe(true)
+        console.log(`✅ Alice's final USDC balance: ${aliceFinalUsdc} (expected: 0)`)
 
-        // // Verify Alice received STRK on Starknet
-        // const aliceStrkBalance = await strkContract.connect(aliceStarknetAccount).balanceOf(aliceStarknetAccount.address)
-        // const expectedStrkAmount = order.takingAmount
-        // expect(BigInt(aliceStrkBalance.low)).toBe(expectedStrkAmount)
-        // console.log(`✅ Alice's STRK balance on Starknet: ${BigInt(aliceStrkBalance.low) / 10n ** 18n} STRK (expected: ${expectedStrkAmount / 10n ** 18n})`)
+        // Verify Alice received STRK on Starknet
+        const aliceEthBalance = await ethContract.balanceOf(aliceStarknetAccount.address)
+        const expectedEthAmount = order.takingAmount
+        console.log(
+            `✅ Alice's STRK balance on Starknet: ${(BigInt(aliceEthBalance) - aliceInitialEthBalance) / 10n ** 18n} STRK (expected: ${expectedEthAmount / 10n ** 18n})`
+        )
+        expect(BigInt(aliceEthBalance) - aliceInitialEthBalance).toBe(expectedEthAmount)
 
         console.log('\n🎉 CROSS-CHAIN SWAP COMPLETED SUCCESSFULLY!')
         console.log('='.repeat(60))
@@ -485,7 +459,7 @@ describe('EVM-to-StarkNet Cross-Chain Swap Demo', () => {
         console.log(`   Alice (maker) sent: ${aliceInitialUsdcAmount / 10n ** 6n} USDC on Ethereum`)
         console.log(`   Alice received: ${order.takingAmount / 10n ** 18n} STRK on Starknet`)
         console.log(`   Bob (resolver) earned: ${aliceInitialUsdcAmount / 10n ** 6n} USDC by taking Alice's order`)
-        console.log(`   Alice paid: ${aliceInitialUsdcAmount / 10n ** 6n} USDC and received: 1 STRK in return`)
+        console.log(`   Alice paid: ${aliceInitialUsdcAmount / 10n ** 6n} USDC and received: 1 ETH in return`)
         console.log(`   Secret was successfully revealed and utilized across chains`)
         console.log('='.repeat(60))
 
